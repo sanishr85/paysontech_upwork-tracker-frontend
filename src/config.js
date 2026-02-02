@@ -1,48 +1,85 @@
 // API Configuration
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-// Default service offerings - customize for your team
+// Default service offerings with rate RANGES
 export const DEFAULT_OFFERINGS = [
   {
     name: 'AI Digital Marketing',
-    keywords: ['AI marketing', 'digital marketing', 'marketing automation', 'AI campaign', 'social media AI'],
-    defaultRate: 85
+    keywords: ['AI marketing', 'digital marketing', 'marketing automation', 'AI campaign', 'social media AI', 'social media'],
+    rateMin: 65,
+    rateMax: 95,
+    skills: ['Social Media Marketing', 'AI Tools', 'Content Strategy', 'Analytics', 'Paid Advertising']
   },
   {
     name: 'Website Design & Development',
-    keywords: ['website', 'web design', 'web development', 'react', 'nextjs', 'frontend', 'ecommerce'],
-    defaultRate: 95
+    keywords: ['website', 'web design', 'web development', 'react', 'nextjs', 'frontend', 'ecommerce', 'wordpress'],
+    rateMin: 75,
+    rateMax: 120,
+    skills: ['React', 'Next.js', 'WordPress', 'UI/UX Design', 'HTML/CSS', 'JavaScript', 'E-commerce']
   },
   {
     name: 'AI Agents & Automation',
-    keywords: ['AI agent', 'automation', 'chatbot', 'workflow automation', 'RPA', 'process automation'],
-    defaultRate: 110
+    keywords: ['AI agent', 'automation', 'chatbot', 'workflow automation', 'RPA', 'process automation', 'GPT', 'LLM'],
+    rateMin: 90,
+    rateMax: 150,
+    skills: ['Python', 'LangChain', 'OpenAI API', 'Automation', 'Chatbot Development', 'Integration']
   },
   {
     name: 'Cybersecurity Support',
-    keywords: ['cybersecurity', 'security audit', 'penetration testing', 'infosec', 'vulnerability'],
-    defaultRate: 120
+    keywords: ['cybersecurity', 'security audit', 'penetration testing', 'infosec', 'vulnerability', 'security'],
+    rateMin: 100,
+    rateMax: 160,
+    skills: ['Penetration Testing', 'Security Audits', 'Compliance', 'Network Security', 'SIEM']
   },
   {
     name: 'IT Infrastructure',
-    keywords: ['IT infrastructure', 'cloud migration', 'AWS', 'Azure', 'DevOps', 'server management'],
-    defaultRate: 100
+    keywords: ['IT infrastructure', 'cloud migration', 'AWS', 'Azure', 'DevOps', 'server management', 'cloud'],
+    rateMin: 80,
+    rateMax: 130,
+    skills: ['AWS', 'Azure', 'DevOps', 'Docker', 'Kubernetes', 'Linux', 'CI/CD']
   }
 ];
+
+// Default proposal template - user can customize this
+export const DEFAULT_PROPOSAL_TEMPLATE = `Hi [CLIENT_NAME],
+
+[HOOK - Show you understand their problem]
+
+I've reviewed your project for [PROJECT_TITLE] and I'm confident I can deliver exactly what you need.
+
+**Why I'm the Right Fit:**
+[EXPERIENCE_POINTS]
+
+**My Approach:**
+[METHODOLOGY]
+
+**Timeline & Deliverables:**
+[TIMELINE]
+
+**Investment:**
+- Rate: $[RATE]/hr
+- Estimated Hours: [HOURS]
+- Total Estimate: $[TOTAL]
+
+I'd love to discuss your project in more detail. When would be a good time for a quick call?
+
+Best regards,
+[YOUR_NAME]
+PaysonTech LLC`;
 
 // Parse Apify job data into our app format
 export function parseApifyJob(job, matchedKeyword, offering) {
   let matchScore = 60;
   const title = (job.title || '').toLowerCase();
   const description = (job.description || '').toLowerCase();
-  const skills = (job.skills || []).map(s => s.toLowerCase());
+  const jobSkills = (job.skills || []).map(s => s.toLowerCase());
   
   if (offering) {
     offering.keywords.forEach(keyword => {
       const keywordLower = keyword.toLowerCase();
       if (title.includes(keywordLower)) matchScore += 10;
       if (description.includes(keywordLower)) matchScore += 5;
-      if (skills.some(s => s.includes(keywordLower))) matchScore += 8;
+      if (jobSkills.some(s => s.includes(keywordLower))) matchScore += 8;
     });
   }
   
@@ -71,10 +108,12 @@ export function parseApifyJob(job, matchedKeyword, offering) {
   
   let estimatedHours = 20;
   if (budgetMax > 0 && !isHourly) {
-    const avgRate = offering?.defaultRate || 100;
+    const avgRate = offering ? (offering.rateMin + offering.rateMax) / 2 : 100;
     estimatedHours = Math.max(10, Math.floor(budgetMax / avgRate));
   } else if (isHourly) {
-    estimatedHours = Math.floor(Math.random() * 60) + 20;
+    if (description.length > 1000) estimatedHours = 60;
+    else if (description.length > 500) estimatedHours = 40;
+    else estimatedHours = 20;
   }
   
   return {
@@ -90,7 +129,8 @@ export function parseApifyJob(job, matchedKeyword, offering) {
     isHourly,
     estimatedHours,
     skills: job.skills || [],
-    country: job.client?.countryCode || '',
+    country: job.client?.countryCode || job.client?.country || '',
+    location: job.client?.location || job.client?.country || '',
     matchScore,
     searchKeyword: matchedKeyword,
     applicationCost: job.applicationCost,
@@ -100,8 +140,42 @@ export function parseApifyJob(job, matchedKeyword, offering) {
       totalSpent: job.client?.stats?.totalSpent,
       hireRate: job.client?.stats?.hireRate,
       feedbackRate: job.client?.stats?.feedbackRate,
-      paymentVerified: job.client?.paymentMethodVerified
+      paymentVerified: job.client?.paymentMethodVerified,
+      country: job.client?.countryCode || job.client?.country || ''
     },
     experienceLevel: job.vendor?.experienceLevel
   };
+}
+
+// Analyze skill gaps
+export function analyzeSkillGaps(jobSkills, offeringSkills) {
+  const jobSkillsLower = jobSkills.map(s => s.toLowerCase());
+  const offeringSkillsLower = offeringSkills.map(s => s.toLowerCase());
+  
+  const matched = [], missing = [];
+  
+  jobSkillsLower.forEach((skill, i) => {
+    const hasSkill = offeringSkillsLower.some(os => os.includes(skill) || skill.includes(os));
+    if (hasSkill) matched.push(jobSkills[i]);
+    else missing.push(jobSkills[i]);
+  });
+  
+  return { matched, missing };
+}
+
+// Calculate confidence score
+export function calculateConfidence(project, offering, skillGaps) {
+  let confidence = 50;
+  confidence += (project.matchScore - 60) * 0.5;
+  const skillCoverage = skillGaps.matched.length / (skillGaps.matched.length + skillGaps.missing.length || 1);
+  confidence += skillCoverage * 20;
+  if (project.client?.paymentVerified) confidence += 5;
+  if (project.client?.totalSpent > 10000) confidence += 5;
+  if (project.client?.feedbackRate >= 4.5) confidence += 5;
+  if (offering && project.budgetMax > 0) {
+    const avgRate = (offering.rateMin + offering.rateMax) / 2;
+    if (project.isHourly && project.budgetMax >= avgRate) confidence += 10;
+    else if (!project.isHourly && project.budgetMax >= avgRate * 20) confidence += 10;
+  }
+  return Math.min(Math.max(Math.round(confidence), 20), 95);
 }
