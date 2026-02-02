@@ -3,7 +3,7 @@ import {
   Search, TrendingUp, Clock, Users, Calendar, Zap, FileText, 
   DollarSign, AlertCircle, CheckCircle, XCircle, Settings, 
   Plus, Trash2, Edit, RefreshCw, Wifi, WifiOff, ExternalLink, 
-  Copy, Star, Bookmark, BookmarkCheck 
+  Copy, Star, Bookmark, Bookmark 
 } from 'lucide-react';
 import { API_URL, DEFAULT_OFFERINGS } from './config';
 
@@ -655,7 +655,7 @@ Return ONLY valid JSON:
                           onClick={(e) => { e.stopPropagation(); toggleSaveProject(project); }}
                           className={`p-1 rounded transition-colors ${isSaved ? 'text-amber-400' : 'text-slate-500 hover:text-amber-400'}`}
                         >
-                          {isSaved ? <BookmarkCheck size={16} /> : <Bookmark size={16} />}
+                          {isSaved ? <Bookmark size={16} /> : <Bookmark size={16} />}
                         </button>
                       </div>
                     </div>
