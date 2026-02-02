@@ -498,7 +498,7 @@ function App() {
                   <div className="w-full bg-slate-700 rounded-full h-2"><div className="bg-amber-500 h-2 rounded-full" style={{width: `${(summary.budgetBreakdown.medium.length / summary.total * 100) || 0}%`}}></div></div>
                   
                   <div className="flex items-center justify-between mt-2">
-                    <span className="flex items-center gap-2"><ArrowDownRight size={14} className="text-slate-400"/> Low (< $1k / < $40/hr)</span>
+                    <span className="flex items-center gap-2"><ArrowDownRight size={14} className="text-slate-400"/> Low (&lt; $1k / &lt; $40/hr)</span>
                     <span className="font-bold text-slate-400">{summary.budgetBreakdown.low.length}</span>
                   </div>
                   <div className="w-full bg-slate-700 rounded-full h-2"><div className="bg-slate-500 h-2 rounded-full" style={{width: `${(summary.budgetBreakdown.low.length / summary.total * 100) || 0}%`}}></div></div>
