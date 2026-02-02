@@ -8,53 +8,51 @@ export const DEFAULT_OFFERINGS = [
     keywords: ['AI marketing', 'digital marketing', 'marketing automation', 'AI campaign', 'social media AI', 'social media'],
     rateMin: 65,
     rateMax: 95,
-    skills: ['Social Media Marketing', 'AI Tools', 'Content Strategy', 'Analytics', 'Paid Advertising']
+    skills: ['Social Media Marketing', 'AI Tools', 'Content Strategy', 'Analytics', 'Paid Advertising', 'SEO', 'Content Marketing']
   },
   {
     name: 'Website Design & Development',
     keywords: ['website', 'web design', 'web development', 'react', 'nextjs', 'frontend', 'ecommerce', 'wordpress'],
     rateMin: 75,
     rateMax: 120,
-    skills: ['React', 'Next.js', 'WordPress', 'UI/UX Design', 'HTML/CSS', 'JavaScript', 'E-commerce']
+    skills: ['React', 'Next.js', 'WordPress', 'UI/UX Design', 'HTML/CSS', 'JavaScript', 'E-commerce', 'Web Development', 'PHP', 'Shopify']
   },
   {
     name: 'AI Agents & Automation',
     keywords: ['AI agent', 'automation', 'chatbot', 'workflow automation', 'RPA', 'process automation', 'GPT', 'LLM'],
     rateMin: 90,
     rateMax: 150,
-    skills: ['Python', 'LangChain', 'OpenAI API', 'Automation', 'Chatbot Development', 'Integration']
+    skills: ['Python', 'LangChain', 'OpenAI API', 'Automation', 'Chatbot Development', 'Integration', 'n8n', 'Zapier', 'Make']
   },
   {
     name: 'Cybersecurity Support',
     keywords: ['cybersecurity', 'security audit', 'penetration testing', 'infosec', 'vulnerability', 'security'],
     rateMin: 100,
     rateMax: 160,
-    skills: ['Penetration Testing', 'Security Audits', 'Compliance', 'Network Security', 'SIEM']
+    skills: ['Penetration Testing', 'Security Audits', 'Compliance', 'Network Security', 'SIEM', 'Vulnerability Assessment']
   },
   {
     name: 'IT Infrastructure',
     keywords: ['IT infrastructure', 'cloud migration', 'AWS', 'Azure', 'DevOps', 'server management', 'cloud'],
     rateMin: 80,
     rateMax: 130,
-    skills: ['AWS', 'Azure', 'DevOps', 'Docker', 'Kubernetes', 'Linux', 'CI/CD']
+    skills: ['AWS', 'Azure', 'DevOps', 'Docker', 'Kubernetes', 'Linux', 'CI/CD', 'Terraform', 'Cloud Architecture']
   }
 ];
 
-// Default proposal template - user can customize this
-export const DEFAULT_PROPOSAL_TEMPLATE = `Hi [CLIENT_NAME],
+// Default proposal template
+export const DEFAULT_PROPOSAL_TEMPLATE = `Hi,
 
-[HOOK - Show you understand their problem]
-
-I've reviewed your project for [PROJECT_TITLE] and I'm confident I can deliver exactly what you need.
+I've carefully reviewed your project and I'm excited about the opportunity to help you achieve your goals.
 
 **Why I'm the Right Fit:**
-[EXPERIENCE_POINTS]
+[Specific experience relevant to their project]
 
 **My Approach:**
-[METHODOLOGY]
+[Clear methodology and how I'll tackle their requirements]
 
 **Timeline & Deliverables:**
-[TIMELINE]
+[Realistic timeline with milestones]
 
 **Investment:**
 - Rate: $[RATE]/hr
@@ -64,8 +62,7 @@ I've reviewed your project for [PROJECT_TITLE] and I'm confident I can deliver e
 I'd love to discuss your project in more detail. When would be a good time for a quick call?
 
 Best regards,
-[YOUR_NAME]
-PaysonTech LLC`;
+PaysonTech Team`;
 
 // Parse Apify job data into our app format
 export function parseApifyJob(job, matchedKeyword, offering) {
@@ -143,39 +140,7 @@ export function parseApifyJob(job, matchedKeyword, offering) {
       paymentVerified: job.client?.paymentMethodVerified,
       country: job.client?.countryCode || job.client?.country || ''
     },
-    experienceLevel: job.vendor?.experienceLevel
+    experienceLevel: job.vendor?.experienceLevel,
+    duration: job.engagement?.duration || null
   };
-}
-
-// Analyze skill gaps
-export function analyzeSkillGaps(jobSkills, offeringSkills) {
-  const jobSkillsLower = jobSkills.map(s => s.toLowerCase());
-  const offeringSkillsLower = offeringSkills.map(s => s.toLowerCase());
-  
-  const matched = [], missing = [];
-  
-  jobSkillsLower.forEach((skill, i) => {
-    const hasSkill = offeringSkillsLower.some(os => os.includes(skill) || skill.includes(os));
-    if (hasSkill) matched.push(jobSkills[i]);
-    else missing.push(jobSkills[i]);
-  });
-  
-  return { matched, missing };
-}
-
-// Calculate confidence score
-export function calculateConfidence(project, offering, skillGaps) {
-  let confidence = 50;
-  confidence += (project.matchScore - 60) * 0.5;
-  const skillCoverage = skillGaps.matched.length / (skillGaps.matched.length + skillGaps.missing.length || 1);
-  confidence += skillCoverage * 20;
-  if (project.client?.paymentVerified) confidence += 5;
-  if (project.client?.totalSpent > 10000) confidence += 5;
-  if (project.client?.feedbackRate >= 4.5) confidence += 5;
-  if (offering && project.budgetMax > 0) {
-    const avgRate = (offering.rateMin + offering.rateMax) / 2;
-    if (project.isHourly && project.budgetMax >= avgRate) confidence += 10;
-    else if (!project.isHourly && project.budgetMax >= avgRate * 20) confidence += 10;
-  }
-  return Math.min(Math.max(Math.round(confidence), 20), 95);
 }

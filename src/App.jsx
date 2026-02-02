@@ -4,9 +4,9 @@ import {
   DollarSign, AlertCircle, CheckCircle, XCircle, Settings, 
   Plus, Trash2, Edit, RefreshCw, Wifi, WifiOff, ExternalLink, 
   Copy, Bookmark, Star, Shield, User, MapPin, Send, Users,
-  ThumbsUp, MessageSquare, Filter, Eye, PenTool
+  ThumbsUp, Eye, PenTool, Download, HelpCircle
 } from 'lucide-react';
-import { API_URL, DEFAULT_OFFERINGS, DEFAULT_PROPOSAL_TEMPLATE, parseApifyJob, analyzeSkillGaps, calculateConfidence } from './config';
+import { API_URL, DEFAULT_OFFERINGS, DEFAULT_PROPOSAL_TEMPLATE, parseApifyJob } from './config';
 
 function App() {
   const [projects, setProjects] = useState([]);
@@ -106,69 +106,98 @@ function App() {
   const generateProposal = async (project) => {
     setGeneratingProposal(true);
     const offering = offerings.find(o => o.name === project.category) || offerings[0];
-    const avgRate = Math.round((offering.rateMin + offering.rateMax) / 2);
-    const skillGaps = analyzeSkillGaps(project.skills || [], offering.skills || []);
-    const confidence = calculateConfidence(project, offering, skillGaps);
-    const estimatedHours = project.estimatedHours || 20;
-    const estimatedCostMin = estimatedHours * offering.rateMin;
-    const estimatedCostMax = estimatedHours * offering.rateMax;
     
     try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const response = await fetch(`${API_URL}/api/generate-proposal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'claude-sonnet-4-20250514', max_tokens: 2000,
-          messages: [{ role: 'user', content: `Analyze this Upwork project and generate a proposal.
-
-PROJECT: ${project.title}
-Description: ${project.description}
-Skills: ${project.skills?.join(', ') || 'Not specified'}
-Budget: ${project.budget}
-Client Country: ${project.country || 'N/A'}
-Client Spent: $${project.client?.totalSpent?.toLocaleString() || '0'}
-
-OUR CAPABILITIES:
-Category: ${offering.name}
-Our Skills: ${offering.skills?.join(', ')}
-Rate: $${offering.rateMin}-$${offering.rateMax}/hr
-Skills Match: ${skillGaps.matched.join(', ') || 'General'}
-Skills Missing: ${skillGaps.missing.join(', ') || 'None'}
-
-TEMPLATE: ${proposalTemplate}
-
-Return JSON only:
-{
-  "proposal": "Full proposal text with \\n for line breaks",
-  "analysis": {
-    "projectSummary": "2-3 sentence summary",
-    "estimatedHours": ${estimatedHours},
-    "complexity": "Low/Medium/High",
-    "recommendedRate": ${avgRate},
-    "totalEstimateMin": ${estimatedCostMin},
-    "totalEstimateMax": ${estimatedCostMax},
-    "confidenceScore": ${confidence},
-    "confidenceReason": "Brief explanation",
-    "skillsMatched": ${JSON.stringify(skillGaps.matched)},
-    "skillsMissing": ${JSON.stringify(skillGaps.missing)},
-    "recommendation": "STRONG BID/BID/CONSIDER/SKIP",
-    "recommendationReason": "Why",
-    "keyDeliverables": ["d1", "d2", "d3"],
-    "risks": ["r1", "r2"],
-    "timeline": "X weeks"
-  }
-}` }]
+          project,
+          offering,
+          allOfferings: offerings,
+          template: proposalTemplate
         })
       });
+      
       const data = await response.json();
-      const text = data.content?.find(i => i.type === 'text')?.text || '';
-      let proposalData;
-      try { proposalData = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim()); }
-      catch { proposalData = { proposal: text, analysis: { projectSummary: project.description.slice(0, 200), estimatedHours, complexity: 'Medium', recommendedRate: avgRate, totalEstimateMin: estimatedCostMin, totalEstimateMax: estimatedCostMax, confidenceScore: confidence, confidenceReason: 'Based on analysis', skillsMatched: skillGaps.matched, skillsMissing: skillGaps.missing, recommendation: confidence >= 70 ? 'BID' : 'CONSIDER', recommendationReason: 'General assessment', keyDeliverables: ['Deliverables TBD'], risks: ['Standard risks'], timeline: `${Math.ceil(estimatedHours / 40)} weeks` }}; }
-      setProposals(prev => ({ ...prev, [project.id]: { ...proposalData, offering, generatedAt: new Date() } }));
+      
+      if (data.error && !data.analysis) {
+        throw new Error(data.error);
+      }
+      
+      setProposals(prev => ({
+        ...prev,
+        [project.id]: {
+          proposal: data.proposal || 'Proposal generation failed. Please try again.',
+          analysis: data.analysis || {},
+          offering,
+          generatedAt: new Date()
+        }
+      }));
     } catch (error) {
-      setProposals(prev => ({ ...prev, [project.id]: { proposal: `Error: ${error.message}`, analysis: { projectSummary: 'Error', estimatedHours, complexity: 'Unknown', recommendedRate: avgRate, totalEstimateMin: estimatedCostMin, totalEstimateMax: estimatedCostMax, confidenceScore: 50, skillsMatched: skillGaps.matched, skillsMissing: skillGaps.missing, recommendation: 'REVIEW', keyDeliverables: [], risks: ['Error occurred'], timeline: 'TBD' }, offering, generatedAt: new Date() } }));
+      console.error('Proposal error:', error);
+      setProposals(prev => ({
+        ...prev,
+        [project.id]: {
+          proposal: `Error: ${error.message}. Please check that the backend has ANTHROPIC_API_KEY configured.`,
+          analysis: {
+            projectSummary: 'Error generating analysis',
+            estimatedHours: project.estimatedHours || 20,
+            complexity: 'Unknown',
+            recommendedRate: 100,
+            totalEstimateMin: 0,
+            totalEstimateMax: 0,
+            confidenceScore: 0,
+            confidenceBreakdown: ['Error occurred'],
+            skillsMatched: [],
+            skillsMissing: project.skills || [],
+            recommendation: 'REVIEW',
+            recommendationReason: error.message,
+            keyDeliverables: [],
+            risks: ['Analysis failed'],
+            timeline: 'TBD'
+          },
+          offering,
+          generatedAt: new Date()
+        }
+      }));
     }
     setGeneratingProposal(false);
+  };
+
+  const exportToCSV = (project, proposalData) => {
+    const analysis = proposalData.analysis || {};
+    const csvContent = `Field,Value
+Project Title,"${project.title?.replace(/"/g, '""')}"
+Client Country,"${project.country || 'N/A'}"
+Client Budget,"${project.budget}"
+Client Total Spent,"$${project.client?.totalSpent?.toLocaleString() || '0'}"
+Match Score,"${project.matchScore}%"
+AI Recommendation,"${analysis.recommendation || 'N/A'}"
+Confidence Score,"${analysis.confidenceScore || 0}%"
+Confidence Breakdown,"${(analysis.confidenceBreakdown || []).join('; ')}"
+Project Summary,"${(analysis.projectSummary || '').replace(/"/g, '""')}"
+Estimated Hours,"${analysis.estimatedHours || 'N/A'}"
+Complexity,"${analysis.complexity || 'N/A'}"
+Our Rate Range,"$${proposalData.offering?.rateMin || 0}-$${proposalData.offering?.rateMax || 0}/hr"
+Total Estimate,"$${analysis.totalEstimateMin?.toLocaleString() || 0}-$${analysis.totalEstimateMax?.toLocaleString() || 0}"
+Skills We Have,"${(analysis.skillsMatched || []).join(', ')}"
+Skills Missing,"${(analysis.skillsMissing || []).join(', ')}"
+Key Deliverables,"${(analysis.keyDeliverables || []).join('; ')}"
+Risks,"${(analysis.risks || []).join('; ')}"
+Timeline,"${analysis.timeline || 'N/A'}"
+Questions for Client,"${(analysis.questionsForClient || []).join('; ')}"
+Upwork Link,"${project.link}"
+
+PROPOSAL:
+"${(proposalData.proposal || '').replace(/"/g, '""')}"
+`;
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `proposal_${project.title?.slice(0, 30).replace(/[^a-z0-9]/gi, '_') || 'project'}.csv`;
+    link.click();
   };
 
   const copyProposal = async (text, id) => { await navigator.clipboard.writeText(text); setCopiedId(id); setTimeout(() => setCopiedId(null), 2000); };
@@ -205,7 +234,13 @@ Return JSON only:
   };
 
   const getTimeAgo = (date) => { const h = Math.floor((Date.now() - new Date(date)) / 3600000); return h < 1 ? 'Just now' : h < 24 ? `${h}h ago` : `${Math.floor(h/24)}d ago`; };
-  const getRecommendationColor = (rec) => { if (rec === 'STRONG BID') return 'bg-emerald-500 text-white'; if (rec === 'BID') return 'bg-blue-500 text-white'; if (rec === 'CONSIDER') return 'bg-amber-500 text-white'; return 'bg-slate-500 text-white'; };
+  const getRecommendationColor = (rec) => { 
+    if (rec === 'STRONG BID') return 'bg-emerald-500 text-white'; 
+    if (rec === 'BID') return 'bg-blue-500 text-white'; 
+    if (rec === 'CONSIDER') return 'bg-amber-500 text-white'; 
+    if (rec === 'SKIP') return 'bg-red-500 text-white';
+    return 'bg-slate-500 text-white'; 
+  };
 
   useEffect(() => { checkProxyStatus(); fetchProjects(); const i1 = setInterval(checkProxyStatus, 30000); const i2 = setInterval(fetchProjects, 300000); return () => { clearInterval(i1); clearInterval(i2); }; }, []);
 
@@ -214,7 +249,7 @@ Return JSON only:
       <div className="border-b border-slate-800 bg-slate-950/50 backdrop-blur-sm sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-4">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
-            <div><h1 className="text-2xl font-bold gradient-text">Upwork Tracker</h1><p className="text-slate-400 text-sm">AI-Powered Project Intelligence</p></div>
+            <div><h1 className="text-2xl font-bold gradient-text">PaysonTech Upwork Tracker</h1><p className="text-slate-400 text-sm">AI-Powered Project Intelligence</p></div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm ${proxyStatus === 'online' ? 'bg-emerald-500/20 text-emerald-300' : proxyStatus === 'checking' ? 'bg-amber-500/20 text-amber-300' : 'bg-rose-500/20 text-rose-300'}`}>
                 {proxyStatus === 'online' ? <Wifi size={16}/> : proxyStatus === 'checking' ? <RefreshCw size={16} className="animate-spin"/> : <WifiOff size={16}/>}
@@ -279,7 +314,7 @@ Return JSON only:
                     {project.skills?.length > 0 && <div className="flex flex-wrap gap-1 mb-2">{project.skills.slice(0, 4).map((s, i) => <span key={i} className="px-2 py-0.5 bg-slate-700/50 text-slate-300 text-xs rounded">{s}</span>)}{project.skills.length > 4 && <span className="text-slate-500 text-xs">+{project.skills.length - 4}</span>}</div>}
                     <div className="flex items-center gap-3 mb-3 text-sm flex-wrap">
                       <span className="flex items-center gap-1"><DollarSign size={14} className="text-slate-500"/>{project.budget}</span>
-                      <span className="flex items-center gap-1"><Clock size={14} className="text-slate-500"/>{project.estimatedHours}h</span>
+                      <span className="flex items-center gap-1"><Clock size={14} className="text-slate-500"/>{project.estimatedHours}h est.</span>
                       {project.client?.totalSpent > 0 && <span className="text-emerald-400 flex items-center gap-1" title="Client's total Upwork spending"><User size={14}/>${(project.client.totalSpent/1000).toFixed(0)}k spent</span>}
                     </div>
                     <div className="flex gap-2">
@@ -315,36 +350,91 @@ Return JSON only:
               <button onClick={() => setSelectedProject(null)} className="p-1 hover:bg-slate-700 rounded-lg h-fit"><XCircle size={24}/></button>
             </div>
             <p className="text-slate-300 text-sm mb-4 max-h-32 overflow-y-auto">{selectedProject.description}</p>
+            
+            {/* Client Info */}
+            <div className="glass rounded-lg p-3 mb-4">
+              <p className="text-xs text-slate-500 mb-2">CLIENT INFO</p>
+              <div className="flex flex-wrap gap-4 text-sm">
+                <span>Budget: <strong>{selectedProject.budget}</strong></span>
+                {selectedProject.client?.totalSpent > 0 && <span className="text-emerald-400">${(selectedProject.client.totalSpent/1000).toFixed(0)}k spent on Upwork</span>}
+                {selectedProject.client?.hireRate > 0 && <span>{selectedProject.client.hireRate}% hire rate</span>}
+                {selectedProject.client?.feedbackRate > 0 && <span>⭐ {selectedProject.client.feedbackRate} rating</span>}
+                {selectedProject.client?.paymentVerified && <span className="text-emerald-400 flex items-center gap-1"><Shield size={12}/>Payment Verified</span>}
+              </div>
+            </div>
+            
             {selectedProject.skills?.length > 0 && <div className="mb-4"><p className="text-xs text-slate-500 mb-2">REQUIRED SKILLS</p><div className="flex flex-wrap gap-1">{selectedProject.skills.map((s, i) => <span key={i} className="px-2 py-1 bg-slate-700/50 text-slate-300 text-xs rounded">{s}</span>)}</div></div>}
 
             {proposals[selectedProject.id] ? (
               <div className="space-y-4">
+                {/* Recommendation Banner */}
                 <div className={`rounded-lg p-4 ${getRecommendationColor(proposals[selectedProject.id].analysis?.recommendation)}`}>
                   <div className="flex items-center justify-between">
                     <div><p className="text-xs opacity-80">AI RECOMMENDATION</p><p className="text-xl font-bold">{proposals[selectedProject.id].analysis?.recommendation || 'REVIEW'}</p></div>
-                    <div className="text-right"><p className="text-xs opacity-80">CONFIDENCE</p><p className="text-2xl font-bold">{proposals[selectedProject.id].analysis?.confidenceScore || 50}%</p></div>
+                    <div className="text-right"><p className="text-xs opacity-80">CONFIDENCE</p><p className="text-2xl font-bold">{proposals[selectedProject.id].analysis?.confidenceScore || 0}%</p></div>
                   </div>
                   <p className="text-sm mt-2 opacity-90">{proposals[selectedProject.id].analysis?.recommendationReason}</p>
                 </div>
+                
+                {/* Confidence Breakdown */}
+                {proposals[selectedProject.id].analysis?.confidenceBreakdown?.length > 0 && (
+                  <div className="glass rounded-lg p-4">
+                    <p className="text-xs text-slate-500 mb-2 flex items-center gap-1"><HelpCircle size={12}/> WHY THIS CONFIDENCE SCORE?</p>
+                    <ul className="text-sm text-slate-300 space-y-1">
+                      {proposals[selectedProject.id].analysis.confidenceBreakdown.map((item, i) => (
+                        <li key={i} className="flex items-center gap-2"><CheckCircle size={12} className="text-emerald-400"/>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                
                 <div className="glass rounded-lg p-4"><p className="text-xs text-slate-500 mb-2">PROJECT SUMMARY</p><p className="text-slate-200 text-sm">{proposals[selectedProject.id].analysis?.projectSummary}</p></div>
+                
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <div className="glass rounded-lg p-3"><p className="text-xs text-slate-500">Est. Hours</p><p className="text-lg font-bold">{proposals[selectedProject.id].analysis?.estimatedHours}h</p></div>
-                  <div className="glass rounded-lg p-3"><p className="text-xs text-slate-500">Complexity</p><p className="text-lg font-bold">{proposals[selectedProject.id].analysis?.complexity}</p></div>
-                  <div className="glass rounded-lg p-3"><p className="text-xs text-slate-500">Our Rate</p><p className="text-lg font-bold">${proposals[selectedProject.id].offering?.rateMin}-${proposals[selectedProject.id].offering?.rateMax}/hr</p></div>
-                  <div className="glass rounded-lg p-3"><p className="text-xs text-slate-500">Total Estimate</p><p className="text-lg font-bold gradient-text">${proposals[selectedProject.id].analysis?.totalEstimateMin?.toLocaleString()}-${proposals[selectedProject.id].analysis?.totalEstimateMax?.toLocaleString()}</p></div>
+                  <div className="glass rounded-lg p-3"><p className="text-xs text-slate-500">Our Est. Hours</p><p className="text-lg font-bold">{proposals[selectedProject.id].analysis?.estimatedHours}h</p></div>
+                  <div className="glass rounded-lg p-3"><p className="text-xs text-slate-500">Complexity</p><p className="text-lg font-bold">{proposals[selectedProject.id].analysis?.complexity || 'Medium'}</p></div>
+                  <div className="glass rounded-lg p-3"><p className="text-xs text-slate-500">Our Rate Range</p><p className="text-lg font-bold">${proposals[selectedProject.id].offering?.rateMin}-${proposals[selectedProject.id].offering?.rateMax}/hr</p></div>
+                  <div className="glass rounded-lg p-3"><p className="text-xs text-slate-500">Our Estimate</p><p className="text-lg font-bold gradient-text">${proposals[selectedProject.id].analysis?.totalEstimateMin?.toLocaleString()}-${proposals[selectedProject.id].analysis?.totalEstimateMax?.toLocaleString()}</p></div>
                 </div>
+                
+                {/* Timeline */}
+                <div className="glass rounded-lg p-4">
+                  <p className="text-xs text-slate-500 mb-2">TIMELINE</p>
+                  <p className="text-slate-200"><strong>Our Estimate:</strong> {proposals[selectedProject.id].analysis?.timeline || 'TBD'}</p>
+                </div>
+                
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div className="glass rounded-lg p-4"><p className="text-xs text-slate-500 mb-2">✅ SKILLS WE HAVE</p><div className="flex flex-wrap gap-1">{proposals[selectedProject.id].analysis?.skillsMatched?.length > 0 ? proposals[selectedProject.id].analysis.skillsMatched.map((s, i) => <span key={i} className="px-2 py-1 bg-emerald-500/20 text-emerald-300 text-xs rounded">{s}</span>) : <span className="text-slate-400 text-sm">General match</span>}</div></div>
+                  <div className="glass rounded-lg p-4"><p className="text-xs text-slate-500 mb-2">✅ SKILLS WE HAVE (across all categories)</p><div className="flex flex-wrap gap-1">{proposals[selectedProject.id].analysis?.skillsMatched?.length > 0 ? proposals[selectedProject.id].analysis.skillsMatched.map((s, i) => <span key={i} className="px-2 py-1 bg-emerald-500/20 text-emerald-300 text-xs rounded">{s}</span>) : <span className="text-slate-400 text-sm">General experience</span>}</div></div>
                   <div className="glass rounded-lg p-4"><p className="text-xs text-slate-500 mb-2">⚠️ SKILLS WE'RE MISSING</p><div className="flex flex-wrap gap-1">{proposals[selectedProject.id].analysis?.skillsMissing?.length > 0 ? proposals[selectedProject.id].analysis.skillsMissing.map((s, i) => <span key={i} className="px-2 py-1 bg-amber-500/20 text-amber-300 text-xs rounded">{s}</span>) : <span className="text-emerald-400 text-sm">None - full coverage!</span>}</div></div>
                 </div>
+                
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="glass rounded-lg p-4"><p className="text-xs text-slate-500 mb-2">KEY DELIVERABLES</p><ul className="text-sm text-slate-300 space-y-1">{proposals[selectedProject.id].analysis?.keyDeliverables?.map((d, i) => <li key={i} className="flex items-start gap-2"><CheckCircle size={14} className="text-emerald-400 mt-0.5 flex-shrink-0"/>{d}</li>)}</ul></div>
                   <div className="glass rounded-lg p-4"><p className="text-xs text-slate-500 mb-2">POTENTIAL RISKS</p><ul className="text-sm text-slate-300 space-y-1">{proposals[selectedProject.id].analysis?.risks?.map((r, i) => <li key={i} className="flex items-start gap-2"><AlertCircle size={14} className="text-amber-400 mt-0.5 flex-shrink-0"/>{r}</li>)}</ul></div>
                 </div>
+                
+                {/* Questions for Client */}
+                {proposals[selectedProject.id].analysis?.questionsForClient?.length > 0 && (
+                  <div className="glass rounded-lg p-4">
+                    <p className="text-xs text-slate-500 mb-2">❓ QUESTIONS TO ASK CLIENT</p>
+                    <ul className="text-sm text-slate-300 space-y-1">
+                      {proposals[selectedProject.id].analysis.questionsForClient.map((q, i) => <li key={i}>• {q}</li>)}
+                    </ul>
+                  </div>
+                )}
+                
                 <div>
-                  <div className="flex justify-between items-center mb-2"><p className="text-xs text-slate-500">GENERATED PROPOSAL</p><button onClick={() => copyProposal(proposals[selectedProject.id].proposal, selectedProject.id)} className="flex items-center gap-1 px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">{copiedId === selectedProject.id ? <CheckCircle size={14}/> : <Copy size={14}/>}{copiedId === selectedProject.id ? 'Copied!' : 'Copy'}</button></div>
+                  <div className="flex justify-between items-center mb-2">
+                    <p className="text-xs text-slate-500">GENERATED PROPOSAL</p>
+                    <div className="flex gap-2">
+                      <button onClick={() => exportToCSV(selectedProject, proposals[selectedProject.id])} className="flex items-center gap-1 px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm"><Download size={14}/> Export CSV</button>
+                      <button onClick={() => copyProposal(proposals[selectedProject.id].proposal, selectedProject.id)} className="flex items-center gap-1 px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">{copiedId === selectedProject.id ? <CheckCircle size={14}/> : <Copy size={14}/>}{copiedId === selectedProject.id ? 'Copied!' : 'Copy'}</button>
+                    </div>
+                  </div>
                   <div className="glass rounded-lg p-4 max-h-60 overflow-y-auto"><p className="text-slate-200 text-sm whitespace-pre-wrap">{proposals[selectedProject.id].proposal}</p></div>
                 </div>
+                
+                {/* Team Notes */}
                 <div className="glass rounded-lg p-4">
                   <p className="text-xs text-slate-500 mb-2">TEAM NOTES</p>
                   {teamNotes[selectedProject.id]?.length > 0 && <div className="space-y-2 mb-3">{teamNotes[selectedProject.id].map(note => <div key={note.id} className={`p-2 rounded ${note.isRecommendation ? 'bg-purple-500/20' : 'bg-slate-700/50'}`}><p className="text-sm text-slate-300">{note.text}</p><p className="text-xs text-slate-500 mt-1">{note.author} • {new Date(note.timestamp).toLocaleString()}</p></div>)}</div>}
@@ -353,6 +443,7 @@ Return JSON only:
                     <button onClick={() => { const note = prompt('Add recommendation:'); if (note) addTeamNote(selectedProject.id, note, true); }} className="px-3 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg text-sm flex items-center gap-1"><ThumbsUp size={14}/> Recommend</button>
                   </div>
                 </div>
+                
                 <div className="flex gap-2 flex-wrap">
                   <button onClick={() => generateProposal(selectedProject)} disabled={generatingProposal} className="flex-1 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg flex items-center justify-center gap-1 disabled:opacity-50"><RefreshCw size={14} className={generatingProposal ? 'animate-spin' : ''}/> Regenerate</button>
                   <button onClick={() => toggleApplied(selectedProject)} className={`flex-1 py-2 rounded-lg flex items-center justify-center gap-1 ${appliedProjects.some(p => p.id === selectedProject.id) ? 'bg-cyan-600' : 'bg-slate-700 hover:bg-slate-600'}`}><Send size={14}/> {appliedProjects.some(p => p.id === selectedProject.id) ? 'Applied ✓' : 'Mark Applied'}</button>
@@ -361,8 +452,8 @@ Return JSON only:
               </div>
             ) : (
               <div className="text-center py-8">
-                <button onClick={() => generateProposal(selectedProject)} disabled={generatingProposal} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-semibold flex items-center justify-center gap-2 mx-auto disabled:opacity-50"><Zap size={18} className={generatingProposal ? 'animate-pulse' : ''}/> {generatingProposal ? 'Analyzing...' : 'Analyze & Generate'}</button>
-                {generatingProposal && <p className="text-slate-400 text-sm mt-2">This may take 10-20 seconds...</p>}
+                <button onClick={() => generateProposal(selectedProject)} disabled={generatingProposal} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 rounded-lg font-semibold flex items-center justify-center gap-2 mx-auto disabled:opacity-50"><Zap size={18} className={generatingProposal ? 'animate-pulse' : ''}/> {generatingProposal ? 'Analyzing (10-20s)...' : 'Analyze & Generate'}</button>
+                {generatingProposal && <p className="text-slate-400 text-sm mt-2">AI is analyzing the project and generating a proposal...</p>}
               </div>
             )}
           </div>
@@ -373,7 +464,7 @@ Return JSON only:
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setShowTemplateEditor(false)}>
           <div className="glass rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between mb-4"><h2 className="text-xl font-bold">Edit Proposal Template</h2><button onClick={() => setShowTemplateEditor(false)} className="p-1 hover:bg-slate-700 rounded-lg"><XCircle size={24}/></button></div>
-            <p className="text-slate-400 text-sm mb-4">Customize your proposal template. The AI will follow this structure.</p>
+            <p className="text-slate-400 text-sm mb-4">Customize your proposal template. The AI will follow this structure when generating proposals.</p>
             <div className="mb-4"><label className="block text-sm text-slate-400 mb-2">Your Name (for team notes)</label><input type="text" value={userName} onChange={e => setUserName(e.target.value)} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg"/></div>
             <div className="mb-4"><label className="block text-sm text-slate-400 mb-2">Proposal Template</label><textarea value={proposalTemplate} onChange={e => setProposalTemplate(e.target.value)} rows={15} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm font-mono"/></div>
             <div className="flex gap-2"><button onClick={() => setProposalTemplate(DEFAULT_PROPOSAL_TEMPLATE)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg">Reset</button><button onClick={() => setShowTemplateEditor(false)} className="flex-1 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg">Save</button></div>
@@ -385,7 +476,7 @@ Return JSON only:
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50" onClick={() => setShowSettings(false)}>
           <div className="glass rounded-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-5" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between mb-4"><h2 className="text-xl font-bold">Service Categories</h2><button onClick={() => setShowSettings(false)} className="p-1 hover:bg-slate-700 rounded-lg"><XCircle size={24}/></button></div>
-            <p className="text-slate-400 text-sm mb-4">Configure services with rate ranges and skills for better matching.</p>
+            <p className="text-slate-400 text-sm mb-4">Configure services with rate ranges and skills. Skills are matched across ALL categories when analyzing projects.</p>
             <div className="space-y-3 mb-4">
               {offerings.map((o, i) => (
                 <div key={i} className="glass rounded-lg p-4">
@@ -397,12 +488,16 @@ Return JSON only:
                         <div><label className="text-xs text-slate-400">Min Rate ($/hr)</label><input type="number" value={o.rateMin} onChange={e => { const u = [...offerings]; u[i].rateMin = parseFloat(e.target.value) || 0; setOfferings(u); }} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg"/></div>
                         <div><label className="text-xs text-slate-400">Max Rate ($/hr)</label><input type="number" value={o.rateMax} onChange={e => { const u = [...offerings]; u[i].rateMax = parseFloat(e.target.value) || 0; setOfferings(u); }} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg"/></div>
                       </div>
-                      <textarea value={o.skills?.join(', ') || ''} onChange={e => { const u = [...offerings]; u[i].skills = e.target.value.split(',').map(k => k.trim()).filter(k => k); setOfferings(u); }} rows={2} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm" placeholder="Your skills"/>
+                      <div><label className="text-xs text-slate-400">Your Skills (comma-separated)</label><textarea value={o.skills?.join(', ') || ''} onChange={e => { const u = [...offerings]; u[i].skills = e.target.value.split(',').map(k => k.trim()).filter(k => k); setOfferings(u); }} rows={2} className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm" placeholder="React, Node.js, Python..."/></div>
                       <div className="flex gap-2"><button onClick={() => setEditingOffering(null)} className="flex-1 py-2 bg-indigo-600 rounded-lg">Done</button><button onClick={() => { setOfferings(offerings.filter((_, j) => j !== i)); setEditingOffering(null); }} className="px-3 py-2 bg-rose-600/20 text-rose-300 rounded-lg"><Trash2 size={18}/></button></div>
                     </div>
                   ) : (
                     <div className="flex justify-between items-start">
-                      <div><h3 className="font-bold mb-1">{o.name}</h3><div className="flex flex-wrap gap-1 mb-1">{o.keywords.slice(0, 3).map((k, j) => <span key={j} className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 text-xs rounded-full">{k}</span>)}{o.keywords.length > 3 && <span className="text-slate-500 text-xs">+{o.keywords.length - 3}</span>}</div><p className="text-slate-400 text-sm">${o.rateMin}-${o.rateMax}/hr</p></div>
+                      <div>
+                        <h3 className="font-bold mb-1">{o.name}</h3>
+                        <p className="text-slate-400 text-sm mb-1">${o.rateMin}-${o.rateMax}/hr</p>
+                        <div className="flex flex-wrap gap-1">{o.skills?.slice(0, 5).map((s, j) => <span key={j} className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 text-xs rounded-full">{s}</span>)}{o.skills?.length > 5 && <span className="text-slate-500 text-xs">+{o.skills.length - 5}</span>}</div>
+                      </div>
                       <button onClick={() => setEditingOffering(i)} className="p-1 hover:bg-slate-700 rounded-lg"><Edit size={18}/></button>
                     </div>
                   )}
