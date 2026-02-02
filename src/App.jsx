@@ -3,7 +3,7 @@ import {
   Search, TrendingUp, Clock, Users, Calendar, Zap, FileText, 
   DollarSign, AlertCircle, CheckCircle, XCircle, Settings, 
   Plus, Trash2, Edit, RefreshCw, Wifi, WifiOff, ExternalLink, 
-  Copy, Star, Bookmark, Bookmark 
+  Copy, Star, Bookmark 
 } from 'lucide-react';
 import { API_URL, DEFAULT_OFFERINGS } from './config';
 
